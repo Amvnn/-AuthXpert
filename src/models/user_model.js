@@ -6,7 +6,7 @@ import {v4 as uuidv4} from 'uuid';
 const userSchema = new mongoose.Schema({
     UserID :{
         type:String,
-        default: uuidv4,
+        default: () => uuidv4(),
         unique: true,
         required:true
     },
@@ -14,35 +14,32 @@ const userSchema = new mongoose.Schema({
         type: String,
         required:[true,'Please provide your name']
     },
-    email:{
-        type: String,
-        required:[true,'Please provide your email'],
-        unique:true,
-        trim:true,
-        validate:[validator.isEmail,'Please provide a valid email']
-    },
-    password:{
-        type:String,
-        required:[,'Please provide your password'],
-        minlength:8,
-        select:false
-    },
-    phone:{
-        type:String,
-        required:[true,'Please provide your phone number'],
-        unique: true,
-        validator:{
-            validator:function(v){
-                return /^\d{10}$/.test(v);
+    email: { 
+        type: String, 
+        required: true,
+         unique: true ,
+         lowercase : true,
+         trim : true,
+         validate:{
+            validator: function(v){
+                return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
             },
-            message:"Phone number must be 10 digits"
+            message : props => `${props.value} is not a valid email!`
+         }
         },
-        validate(v){
-            if(v.length !== 10){
-                throw new Error('Phone number must be 10 digits');
-            }
-        }
-    },
+
+        password: { 
+            type: String,
+             required: function(){
+                return this.authType === 'local';
+             }
+            },
+        phone: {
+                type: String,
+                 required: false,
+                  unique: true,
+                  sparse: true 
+               },
     isPhoneVerified:{
         type:Boolean,
         default:false
@@ -53,20 +50,33 @@ const userSchema = new mongoose.Schema({
     },
     otp:{
         type:String,
-        select:false
     },
     otpExpires:{
         type:Date,
-        select:false
     },
+    otpResendCount: { 
+        type: Number,
+         default: 0 
+        },
     otpAttempts:{
         type:Number,
         deafult:0,
-        select:false
     },
     lastOtpSentAt:{
         type:Date,
-        select:false
+    },
+    resetPasswordOtp: {
+        type: String
+    },
+    resetPasswordOtpExpires: {
+        type: Date
+    },
+    isResetPasswordOtpVerified: {
+      type: Boolean,
+      default: false
+    },
+    resetPasswordVerifiedAt: {
+        type: Date
     },
     passwordChangedAt:Date,
     passwordResetToken:String,
@@ -95,9 +105,12 @@ userSchema.pre('save',function(next){
     next();
 });
 
-// Password comparison
-userSchema.methods.correctPassword = async function(candidatePassword,userPassword){
-    return await bcrypt.compare(candidatePassword,userPassword);
+// Password comparison for (login)
+userSchema.methods.comparePassword = async function (candidatePassword) {
+    if(this.authType == 'local' && this.password){
+        return await bcrypt.compare(candidatePassword, this.password);
+    }
+    return false;
 };
 
 // password was changes after token was issued

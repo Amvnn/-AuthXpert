@@ -19,7 +19,7 @@ const signToken = (id) => {
     return jwt.sign(
         { id },
         process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRE }
+        { expiresIn: process.env.JWT_EXPIRE || '1h'}
     );
 };
 
@@ -102,7 +102,7 @@ const protect = async (req, res, next) => {
         const decoded = await verifyToken(token);
 
         // 3) Check if user still exists
-        const currentUser = await User.findById(decoded.id);
+        const currentUser = await User.findById({UserID: decoded.id});
         if (!currentUser) {
             return res.status(401).json({
                 status: 'error',

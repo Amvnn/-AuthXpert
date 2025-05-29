@@ -3,6 +3,9 @@ import { generateOTP, sendOTP, signToken, createSendToken, protect, restrictTo }
 import { promisify } from 'util';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+
 
 // Register a new user
 export const registerUser = async (req, res, next) => {
@@ -10,11 +13,18 @@ export const registerUser = async (req, res, next) => {
         const { name, email, password, phone, role } = req.body;
 
         // 1) Check if user exists
-        const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-        if (existingUser) {
+        const existingPhoneUser = await User.findOne({ phone });
+        if (existingPhoneUser) {
             return res.status(400).json({
                 status: 'error',
-                message: 'User with this email or phone already exists'
+                message: 'User with this phone number already exists'
+            });
+        }
+        const existingEmailUser = await User.findOne({ email });
+        if (existingEmailUser) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'User with this email already exists'
             });
         }
 
@@ -28,7 +38,6 @@ export const registerUser = async (req, res, next) => {
             email,
             password,
             phone,
-            role: role || 'Student',
             otp,
             otpExpires:Date.now() + 10 * 60 * 1000
         });
@@ -51,84 +60,101 @@ export const registerUser = async (req, res, next) => {
 };
 
 // Login user
-export const loginUser = async (req, res, next) => {
+export const loginUser = async(req,res) =>{
+    
     try {
-        const { email, password } = req.body;
+        const { phone, password } = req.body;
 
-        // 1) Check if email and password exist
-        if (!email || !password) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Please provide email and password!'
-            });
-        }
-
-        // 2) Check if user exists && password is correct
-        const user = await User.findOne({ email }).select('+password');
-
-        if (!user || !(await user.correctPassword(password, user.password))) {
-            return res.status(401).json({
-                status: 'error',
-                message: 'Incorrect email or password'
-            });
-        }
-
-        // 3) Check if user is verified
-        if (!user.isPhoneVerified) {
-            return res.status(401).json({
-                status: 'error',
-                message: 'Please verify your phone number first'
-            });
-        }
-
-        // 4) If everything ok, send token to client
-        createSendToken(user, 200, res);
-    } catch (error) {
-        next(error);
-    }
-};
-
-// Verify OTP
-export const verifyOTP = async (req, res, next) => {
-    try {
-        const { phone, otp } = req.body;
-        console.log('Verifying OTP:', { phone, otp });  // Debug log
-
-        // 1) Find user by phone and OTP
-        const user = await User.findOne({
+        console.log("Login Request Details:", {
             phone,
-            otp,
-            otpExpires: { $gt: Date.now() }
+            passwordLength: password.length,
         });
 
-        console.log('Found user:', user ? user.email : 'No user found');  // Debug log
-
-        // 2) If OTP is invalid or expired
-        if (!user) {
-            // Check if user exists but OTP is wrong/expired
-            const userExists = await User.findOne({ phone });
-            if (userExists) {
-                console.log('User exists but OTP is invalid/expired. Stored OTP:', userExists.otp);  // Debug log
-            }
-            return res.status(400).json({
-                status: 'error',
-                message: 'Invalid or expired OTP'
-            });
+        // Input validation
+        if (!phone || !password) {
+            return res.status(400).json({ error: 'Phone and password are required' });
         }
 
-        // 3) Mark user as verified
-        user.isPhoneVerified = true;
-        user.otp = undefined;
-        user.otpExpires = undefined;
-        await user.save({ validateBeforeSave: false });
+        const user = await User.findOne({ phone, isPhoneVerified: true });
+        if (!user) {
+            const unverifiedUser = await User.findOne({ phone });
+            if (unverifiedUser) {
+                return res.status(400).send({ error: 'Account not verified. Please verify your phone number.' });
+            }
+        }
+        const isMatch = await bcrypt.compare(password, user.password);
+            
+            console.log('Password Comparison:', {
+                isMatch,
+                passwordType: typeof password,
+                hashedPasswordType: typeof user.password
+            });
 
-        // 4) Send token to client
-        createSendToken(user, 200, res);
-    } catch (error) {
-        next(error);
+            if (!isMatch) {
+                return res.status(400).json({ error: 'Invalid credentials' });
+            }
+
+        const token = jwt.sign({ id: user.UserID }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        
+        // Set the JWT as a cookie (with HttpOnly flag)
+        res.cookie('token', token, {
+           httpOnly: true, // cookie inaccessible to client-side scripts
+           secure: false, // Use 'secure' flag in production
+           sameSite: 'Strict', // Protect against CSRF attacks
+       });
+
+
+        res.status(200).send({ message: 'Login successful', token, id: user.UserID });
+        console.log("Login successful:", { token, id: user.UserID });
+
+    } catch (err) {
+        console.error("Login error:", err);
+        res.status(500).send({ error: 'Login failed', details: err.message });
     }
-};
+}
 
+// Verify OTP
+export const verifyOTP =  async (req, res) => {
+    
+    try {
+        const { phone, otp } = req.body;
+        const user = await User.findOne({ phone });
+        console.log("User found:", user); // Log user info
+
+         if (!user) {
+            return res.status(404).send({ error: 'User not found. Please register first.' });
+        }
+
+        const MAX_ATTEMPTS = 5;
+        if(user.otpAttempts >= MAX_ATTEMPTS ){
+            return res.status(429).json({ message: 'Too many attempts. Please try again later.'})
+        }
+
+        // Check if the OTP matches and is not expired
+        if (user.otp === otp && user.otpExpires > Date.now()) {
+            // OTP is valid, mark the user as verified
+            user.isPhoneVerified = true;
+            user.otp = undefined; // Clear the OTP
+            user.otpExpires = undefined; // Clear OTP expiration
+            user.otpResendCount = 0; // Reset OTP resend count
+            user.otpAttempts = 0
+
+            await user.save(); // Save changes to the user
+
+            // Respond with a success message
+            return res.status(200).json({ message: 'OTP verified successfully! User is now registered.' });
+        } else {
+            
+            // at every failure , otpAttemp will increament by 1.
+            user.otpAttempts +=1;
+            // OTP is invalid or expired
+            return res.status(400).json({ message: 'Invalid or expired OTP.' });
+        }
+    } catch (error) {
+        // Handle any server errors
+        return res.status(500).json({ message: 'An error occurred during OTP verification.', error: error.message });
+    }
+}
 // Resend OTP
 export const resendOTP = async (req, res, next) => {
     try {
