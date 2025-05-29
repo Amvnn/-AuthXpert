@@ -1,5 +1,5 @@
 import User from '../models/user_model.js';
-import { generateOTP, sendOTP, signToken, createSendToken, protect, restrictTo } from '../utils/Auth_Utils.js';
+import { generateOTP, sendOTP, signToken, createSendToken, protect } from '../utils/Auth_Utils.js';
 import { promisify } from 'util';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -94,7 +94,7 @@ export const loginUser = async(req,res) =>{
                 return res.status(400).json({ error: 'Invalid credentials' });
             }
 
-        const token = jwt.sign({ id: user.UserID }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
         
         // Set the JWT as a cookie (with HttpOnly flag)
         res.cookie('token', token, {
@@ -104,8 +104,8 @@ export const loginUser = async(req,res) =>{
        });
 
 
-        res.status(200).send({ message: 'Login successful', token, id: user.UserID });
-        console.log("Login successful:", { token, id: user.UserID });
+        res.status(200).send({ message: 'Login successful', token, id: user._id });
+        console.log("Login successful:", { token, id: user._id });
 
     } catch (err) {
         console.error("Login error:", err);
@@ -323,9 +323,20 @@ export const updatePassword = async (req, res, next) => {
 };
 
 // Get current user
-export const getMe = (req, res, next) => {
-    req.params.id = req.user.id;
-    next();
+export const getMe = async (req, res, next) => {
+    try {
+        // Since protect middleware already attached the user to req.user
+        const user = await User.findById(req.user.id);
+        
+        res.status(200).json({
+            status: 'success',
+            data: {
+                user
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
 };
 
 // Update user data (for logged-in users)

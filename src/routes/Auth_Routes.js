@@ -12,7 +12,7 @@ import {
     deleteMe,
     getMe
 } from '../controllers/Auth_controller.js';
-import { protect, restrictTo } from '../utils/Auth_Utils.js';
+import { protect} from '../utils/Auth_Utils.js';
 
 const router = express.Router();
 
@@ -34,7 +34,7 @@ router.patch('/update-me', updateMe);
 router.delete('/delete-me', deleteMe);
 
 // Admin routes
-router.use(restrictTo('Admin'));
+// router.use(restrictTo('Admin'));
 // Add admin-only routes here
 
 export default router;

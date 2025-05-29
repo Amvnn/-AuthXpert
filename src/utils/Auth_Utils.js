@@ -102,7 +102,7 @@ const protect = async (req, res, next) => {
         const decoded = await verifyToken(token);
 
         // 3) Check if user still exists
-        const currentUser = await User.findById({UserID: decoded.id});
+        const currentUser = await User.findById(decoded.id);
         if (!currentUser) {
             return res.status(401).json({
                 status: 'error',
@@ -126,7 +126,7 @@ const protect = async (req, res, next) => {
     }
 };
 
-// Restrict to certain roles
+// Restrict to certain roles (XXXXXX un-used XXXXX)
 const restrictTo = (...roles) => {
     return (req, res, next) => {
         // roles ['admin', 'lead-guide']. role='user'
@@ -149,6 +149,5 @@ export {
     generateResetToken,
     handleAuthError,
     protect,
-    restrictTo,
     createSendToken
 };
